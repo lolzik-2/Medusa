@@ -1,9 +1,3 @@
-/*
- * Medusa — кастомная прошивка для M5Stack Cardputer ADV (ESP32-S3)
- * Стиль: тёмный фон, синие акценты, белый текст.
- * Управление: ; (вверх/плюс), . (вниз/минус), Enter — выбор, ` — назад/сохранить.
- */
-
 #include <M5Cardputer.h>
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
@@ -19,7 +13,6 @@ extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32
     return 0;
 }
 
-// ======================= КОНСТАНТЫ =======================
 #define IR_TX_PIN 44
 #define SCREEN_W  240
 #define SCREEN_H  135
@@ -35,7 +28,6 @@ extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32
 #define BRIGHT_STEP 15
 #define BRIGHT_DEFAULT 128
 
-// ======================= ГЛОБАЛЬНЫЕ =======================
 IRsend irsend(IR_TX_PIN);
 Preferences prefs;
 
@@ -50,7 +42,6 @@ int menuIndex = 0;
 int scanIndex = 0;
 bool needsRedraw = true;
 
-// Wi-Fi
 struct WiFiNetwork {
     String ssid;
     uint8_t bssid[6];
@@ -60,7 +51,6 @@ struct WiFiNetwork {
 std::vector<WiFiNetwork> networks;
 bool wifiScanInProgress = false;
 
-// Deauth
 bool deauthRunning = false;
 uint8_t deauthFrame[26];
 uint8_t targetBSSID[6];
@@ -70,7 +60,6 @@ unsigned long deauthLastDisplay = 0;
 uint32_t deauthFrameCount = 0;
 bool deauthApStarted = false;
 
-// BLE
 bool bleSpamRunning = false;
 bool bleAppleJuice = true;
 unsigned long lastBlePacket = 0;
@@ -78,7 +67,6 @@ NimBLEAdvertising *pAdvertising = nullptr;
 uint32_t blePacketCount = 0;
 unsigned long bleLastDisplay = 0;
 
-// IR Jammer
 enum JamMode { JAM_BASIC, JAM_ENHANCED, JAM_SWEEP, JAM_RANDOM, JAM_EMPTY };
 const char* JAM_MODE_NAMES[] = {"BASIC", "ENHANCED", "SWEEP", "RANDOM", "EMPTY"};
 
@@ -99,7 +87,6 @@ struct IRJammerState {
 const uint16_t IR_FREQS[] = {30000, 33000, 36000, 38000, 40000, 42000, 56000};
 const int NUM_IR_FREQS = 7;
 
-// ======================= ПРОТОТИПЫ =======================
 void drawBatteryStatus();
 void drawCurrentScreen();
 void drawMenu(const char *title, const char *items[], int itemCount);
@@ -124,7 +111,6 @@ void runBLESpam();
 void stopBLESpam();
 void goToDeepSleep();
 
-// ======================= SETUP =======================
 void setup() {
     Serial.begin(115200);
     auto cfg = M5.config();
@@ -138,7 +124,6 @@ void setup() {
     digitalWrite(IR_TX_PIN, LOW);
     randomSeed(millis());
 
-    // Загрузка яркости из NVS
     prefs.begin("medusa", false);
     currentBrightness = prefs.getUChar("brightness", BRIGHT_DEFAULT);
     if (currentBrightness < BRIGHT_MIN) currentBrightness = BRIGHT_MIN;
@@ -147,7 +132,6 @@ void setup() {
     needsRedraw = true;
 }
 
-// ======================= LOOP =======================
 void loop() {
     M5Cardputer.update();
     bool changed = false;
@@ -168,7 +152,6 @@ void loop() {
             if (up)   { irJam.freqIdx = (irJam.freqIdx + 1) % NUM_IR_FREQS; irJam.forceDisplay = true; }
             if (down) { irJam.freqIdx = (irJam.freqIdx + NUM_IR_FREQS - 1) % NUM_IR_FREQS; irJam.forceDisplay = true; }
         } else if (currentScreen == SETTINGS_MENU) {
-            // Яркость меняется сразу, без Enter
             if (up) {
                 int v = (int)currentBrightness + BRIGHT_STEP;
                 if (v > BRIGHT_MAX) v = BRIGHT_MAX;
@@ -193,7 +176,7 @@ void loop() {
 
         if (back) {
             if (currentScreen == SETTINGS_MENU) {
-                prefs.putUChar("brightness", currentBrightness);  // сохраняем в NVS
+                prefs.putUChar("brightness", currentBrightness);
                 currentScreen = MAIN_MENU; menuIndex = 0; changed = true;
             } else if (currentScreen == IR_JAM_RUN) {
                 digitalWrite(IR_TX_PIN, LOW);
@@ -246,7 +229,6 @@ void loop() {
     delay(5);
 }
 
-// ======================= ОТРИСОВКА =======================
 void drawBatteryStatus() {
     M5Cardputer.Display.fillRect(0, 0, SCREEN_W, 16, PANEL_COLOR);
     M5Cardputer.Display.setTextColor(TEXT_COLOR, PANEL_COLOR);
@@ -361,7 +343,6 @@ void drawCurrentScreen() {
             M5Cardputer.Display.setCursor(12, 42);
             M5Cardputer.Display.print("Brightness: " + String(currentBrightness));
 
-            // Полоса яркости
             int barX = 12, barY = 60, barW = SCREEN_W - 24, barH = 12;
             M5Cardputer.Display.drawRect(barX, barY, barW, barH, TEXT_COLOR);
             int fillW = ((int)currentBrightness * (barW - 2)) / BRIGHT_MAX;
@@ -424,7 +405,6 @@ void drawCurrentScreen() {
     }
 }
 
-// ======================= ХЕЛПЕРЫ =======================
 bool isMenuScreen() {
     return currentScreen == MAIN_MENU   || currentScreen == POWER_MENU ||
            currentScreen == IR_MENU     || currentScreen == WIFI_MENU  ||
@@ -443,7 +423,6 @@ int getItemCount() {
     }
 }
 
-// ======================= ОБРАБОТЧИКИ =======================
 void handleMainMenu() {
     if (menuIndex == 0)      currentScreen = POWER_MENU;
     else if (menuIndex == 1) currentScreen = IR_MENU;
@@ -472,7 +451,6 @@ void handleBLEMenu() {
     currentScreen = BLE_RUN;
 }
 
-// ======================= POWER =======================
 void goToDeepSleep() {
     M5Cardputer.Display.fillScreen(BG_COLOR);
     M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
@@ -482,7 +460,6 @@ void goToDeepSleep() {
     M5.Power.deepSleep();
 }
 
-// ======================= IR =======================
 void startTVBGone() {
     M5Cardputer.Display.fillScreen(BG_COLOR);
     M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
@@ -594,7 +571,6 @@ void runIRJammer() {
     }
 }
 
-// ======================= WI-FI =======================
 void startWiFiScan() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -692,7 +668,6 @@ void stopDeauth() {
     delay(50);
 }
 
-// ======================= BLE =======================
 void startBLESpam(bool apple) {
     NimBLEDevice::init(apple ? "AppleJuice" : "SwiftPair");
     pAdvertising = NimBLEDevice::getAdvertising();
