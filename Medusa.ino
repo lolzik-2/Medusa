@@ -1,7 +1,7 @@
 /*
  * Medusa — кастомная прошивка для M5Stack Cardputer ADV (ESP32-S3)
  * Стиль: тёмный фон, синие акценты, белый текст.
- * Управление: ; (вверх), . (вниз), Enter — выбор, ` — назад/стоп.
+ * Управление: ; (вверх/плюс), . (вниз/минус), Enter — выбор, ` — назад/сохранить.
  */
 
 #include <M5Cardputer.h>
@@ -11,6 +11,7 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_sleep.h>
+#include <Preferences.h>
 #include <algorithm>
 #include <vector>
 
@@ -29,11 +30,19 @@ extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32
 #define TEXT_COLOR   0xFFFF
 #define DIM_COLOR    0x8410
 
+#define BRIGHT_MIN 10
+#define BRIGHT_MAX 255
+#define BRIGHT_STEP 15
+#define BRIGHT_DEFAULT 128
+
 // ======================= ГЛОБАЛЬНЫЕ =======================
 IRsend irsend(IR_TX_PIN);
+Preferences prefs;
+
+uint8_t currentBrightness = BRIGHT_DEFAULT;
 
 enum Screen {
-    MAIN_MENU, POWER_MENU, IR_MENU, WIFI_MENU, BLE_MENU,
+    MAIN_MENU, POWER_MENU, IR_MENU, WIFI_MENU, BLE_MENU, SETTINGS_MENU,
     WIFI_SCAN, BLE_RUN, IR_JAM_CONFIG, IR_JAM_RUN, DEAUTH_RUN
 };
 Screen currentScreen = MAIN_MENU;
@@ -128,6 +137,13 @@ void setup() {
     pinMode(IR_TX_PIN, OUTPUT);
     digitalWrite(IR_TX_PIN, LOW);
     randomSeed(millis());
+
+    // Загрузка яркости из NVS
+    prefs.begin("medusa", false);
+    currentBrightness = prefs.getUChar("brightness", BRIGHT_DEFAULT);
+    if (currentBrightness < BRIGHT_MIN) currentBrightness = BRIGHT_MIN;
+    M5Cardputer.Display.setBrightness(currentBrightness);
+
     needsRedraw = true;
 }
 
@@ -151,6 +167,22 @@ void loop() {
         } else if (currentScreen == IR_JAM_RUN) {
             if (up)   { irJam.freqIdx = (irJam.freqIdx + 1) % NUM_IR_FREQS; irJam.forceDisplay = true; }
             if (down) { irJam.freqIdx = (irJam.freqIdx + NUM_IR_FREQS - 1) % NUM_IR_FREQS; irJam.forceDisplay = true; }
+        } else if (currentScreen == SETTINGS_MENU) {
+            // Яркость меняется сразу, без Enter
+            if (up) {
+                int v = (int)currentBrightness + BRIGHT_STEP;
+                if (v > BRIGHT_MAX) v = BRIGHT_MAX;
+                currentBrightness = (uint8_t)v;
+                M5Cardputer.Display.setBrightness(currentBrightness);
+                changed = true;
+            }
+            if (down) {
+                int v = (int)currentBrightness - BRIGHT_STEP;
+                if (v < BRIGHT_MIN) v = BRIGHT_MIN;
+                currentBrightness = (uint8_t)v;
+                M5Cardputer.Display.setBrightness(currentBrightness);
+                changed = true;
+            }
         } else if (isMenuScreen()) {
             int count = getItemCount();
             if (count > 0) {
@@ -160,7 +192,10 @@ void loop() {
         }
 
         if (back) {
-            if (currentScreen == IR_JAM_RUN) {
+            if (currentScreen == SETTINGS_MENU) {
+                prefs.putUChar("brightness", currentBrightness);  // сохраняем в NVS
+                currentScreen = MAIN_MENU; menuIndex = 0; changed = true;
+            } else if (currentScreen == IR_JAM_RUN) {
                 digitalWrite(IR_TX_PIN, LOW);
                 currentScreen = IR_JAM_CONFIG; menuIndex = (int)irJam.jamMode; changed = true;
             } else if (currentScreen == IR_JAM_CONFIG) {
@@ -289,8 +324,8 @@ void drawWiFiScan() {
 void drawCurrentScreen() {
     switch (currentScreen) {
         case MAIN_MENU: {
-            const char* items[] = {"Power", "IR", "Wi-Fi", "BLE"};
-            drawMenu("Medusa", items, 4); break;
+            const char* items[] = {"Power", "IR", "Wi-Fi", "BLE", "Settings"};
+            drawMenu("Medusa", items, 5); break;
         }
         case POWER_MENU: {
             const char* items[] = {"Deep Sleep", "Restart", "Power Off"};
@@ -315,6 +350,29 @@ void drawCurrentScreen() {
         case BLE_MENU: {
             const char* items[] = {"AppleJuice (iOS)", "SwiftPair (Windows)"};
             drawMenu("BLE Spam", items, 2); break;
+        }
+        case SETTINGS_MENU: {
+            M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, 22);
+            M5Cardputer.Display.print("Settings");
+            M5Cardputer.Display.drawFastHLine(10, 32, SCREEN_W - 20, ACCENT_COLOR);
+
+            M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(12, 42);
+            M5Cardputer.Display.print("Brightness: " + String(currentBrightness));
+
+            // Полоса яркости
+            int barX = 12, barY = 60, barW = SCREEN_W - 24, barH = 12;
+            M5Cardputer.Display.drawRect(barX, barY, barW, barH, TEXT_COLOR);
+            int fillW = ((int)currentBrightness * (barW - 2)) / BRIGHT_MAX;
+            M5Cardputer.Display.fillRect(barX + 1, barY + 1, fillW, barH - 2, ACCENT_COLOR);
+
+            M5Cardputer.Display.setTextColor(DIM_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, SCREEN_H - 25);
+            M5Cardputer.Display.print(";/. change");
+            M5Cardputer.Display.setCursor(10, SCREEN_H - 12);
+            M5Cardputer.Display.print("` save & back");
+            break;
         }
         case WIFI_SCAN: {
             drawWiFiScan(); break;
@@ -375,7 +433,7 @@ bool isMenuScreen() {
 
 int getItemCount() {
     switch (currentScreen) {
-        case MAIN_MENU:      return 4;
+        case MAIN_MENU:      return 5;
         case POWER_MENU:     return 3;
         case IR_MENU:        return 2;
         case WIFI_MENU:      return 1;
@@ -391,6 +449,7 @@ void handleMainMenu() {
     else if (menuIndex == 1) currentScreen = IR_MENU;
     else if (menuIndex == 2) currentScreen = WIFI_MENU;
     else if (menuIndex == 3) currentScreen = BLE_MENU;
+    else if (menuIndex == 4) currentScreen = SETTINGS_MENU;
     menuIndex = 0;
 }
 void handlePowerMenu() {
@@ -516,7 +575,6 @@ void runIRJammer() {
 
     irJam.jamCount++;
 
-    // Frequency hop для SWEEP / RANDOM
     if ((irJam.jamMode == JAM_SWEEP || irJam.jamMode == JAM_RANDOM) && irJam.jamCount % 30 == 0) {
         irJam.freqIdx = (irJam.freqIdx + 1) % NUM_IR_FREQS;
         irJam.forceDisplay = true;
