@@ -31,7 +31,7 @@ jobs:
       - name: Compile sketch
         run: |
           arduino-cli compile \
-            --fqbn m5stack:esp32:m5stack_cardputer \
+            --fqbn "m5stack:esp32:m5stack_cardputer:FlashSize=8M,PartitionScheme=huge_app,CDCOnBoot=cdc,USBMode=hwcdc" \
             --build-property compiler.c.elf.extra_flags="-Wl,--allow-multiple-definition" \
             --output-dir ./build \
             Medusa.ino
@@ -41,7 +41,6 @@ jobs:
 
       - name: Merge binaries into single flashable image
         run: |
-          # Копируем boot_app0.bin из пакета M5Stack (он не попадает в output-dir автоматически)
           BOOT_APP0=$(find ~/.arduino15/packages/m5stack/hardware/esp32 -name "boot_app0.bin" | head -n 1)
           cp "$BOOT_APP0" ./build/boot_app0.bin
 
