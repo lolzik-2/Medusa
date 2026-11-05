@@ -320,14 +320,15 @@ void goToDeepSleep() {
     M5.Power.deepSleep();
 }
 
-// ======================= IR =======================
+// ======================= IR (ИСПРАВЛЕНО: uint32_t) =======================
 void startTVBGone() {
     M5Cardputer.Display.fillScreen(BG_COLOR);
     M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
     M5Cardputer.Display.setCursor(10, 40);
     M5Cardputer.Display.print("TV-B-Gone...");
 
-    uint16_t powerCodes[] = {0x20DF10EF, 0xE0E040BF, 0x10EF, 0x48B7, 0x00FF};
+    // Коды NEC — 32-битные, тип должен быть uint32_t
+    uint32_t powerCodes[] = {0x20DF10EF, 0xE0E040BF, 0x10EF, 0x48B7, 0x00FF};
     for (int i = 0; i < 5; i++) {
         irsend.sendNEC(powerCodes[i], 32);
         delay(20);
@@ -386,7 +387,7 @@ void startTargetDeauth(int index) {
     currentScreen = WIFI_MENU;
 }
 
-// ======================= BLE =======================
+// ======================= BLE (ИСПРАВЛЕНО: addData/setManufacturerData по uint8_t*) =======================
 void startBLESpam(bool apple) {
     NimBLEDevice::init(apple ? "AppleJuice" : "SwiftPair");
     pAdvertising = NimBLEDevice::getAdvertising();
@@ -403,10 +404,12 @@ void runBLESpam() {
     if (bleAppleJuice) {
         uint8_t applePayload[17] = {0x4C, 0x00, 0x07, 0x19, 0x07, 0x00, 0x00, 0x00,
                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        advData.addData(std::string((char*)applePayload, 17));
+        // В NimBLE 2.5.2 addData принимает (const uint8_t*, size_t)
+        advData.addData(applePayload, 17);
     } else {
         advData.setName("SwiftPair Device");
-        advData.setManufacturerData(std::string("\x06\x00\x03\x03\x00\x00", 6));
+        uint8_t swiftData[] = {0x06, 0x00, 0x03, 0x03, 0x00, 0x00};
+        advData.setManufacturerData(swiftData, 6);
     }
     pAdvertising->setAdvertisementData(advData);
     pAdvertising->start();
