@@ -1,0 +1,62 @@
+name: Build Medusa Firmware
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v1
+
+      - name: Install M5Stack ESP32 core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/arduino/package_m5stack_index.json
+          arduino-cli core update-index
+          arduino-cli core install m5stack:esp32
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "M5Cardputer"
+          arduino-cli lib install "IRremoteESP8266"
+          arduino-cli lib install "NimBLE-Arduino"
+
+      - name: Compile sketch
+        run: |
+          arduino-cli compile \
+            --fqbn m5stack:esp32:m5stack_cardputer \
+            --build-property compiler.c.elf.extra_flags="-Wl,--allow-multiple-definition" \
+            --output-dir ./build \
+            Medusa.ino
+
+      - name: Install esptool
+        run: pip install --upgrade esptool
+
+      - name: Merge binaries into single flashable image
+        run: |
+          # Копируем boot_app0.bin из пакета M5Stack (он не попадает в output-dir автоматически)
+          BOOT_APP0=$(find ~/.arduino15/packages/m5stack/hardware/esp32 -name "boot_app0.bin" | head -n 1)
+          cp "$BOOT_APP0" ./build/boot_app0.bin
+
+          esptool.py --chip esp32s3 merge_bin \
+            -o ./build/Medusa-merged.bin \
+            --flash_mode dio \
+            --flash_freq 80m \
+            --flash_size 8MB \
+            0x0     ./build/Medusa.ino.bootloader.bin \
+            0x8000  ./build/Medusa.ino.partitions.bin \
+            0xe000  ./build/boot_app0.bin \
+            0x10000 ./build/Medusa.ino.bin
+
+      - name: Upload merged firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Medusa-merged-firmware
+          path: build/Medusa-merged.bin
