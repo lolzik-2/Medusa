@@ -9,6 +9,26 @@
 #include <algorithm>
 #include <vector>
 
+// ======================= СТРУКТУРЫ ДЛЯ TV-B-GONE =======================
+struct IrCode {
+    uint8_t timer_val;
+    uint8_t numpairs;
+    uint8_t bitcompression;
+    uint16_t times[100];
+    uint8_t codes[50];
+};
+
+struct RawIrCode {
+    uint8_t timer_val;
+    uint8_t numpairs;
+    uint16_t times[100];
+};
+
+// ======================= ПОДКЛЮЧЕНИЕ БАЗЫ IR-КОДОВ =======================
+// Убедись, что файл WORLD_IR_CODES.h лежит в той же папке, что и этот .ino
+#include "WORLD_IR_CODES.h"
+
+// ======================= СИСТЕМНЫЕ КОНСТАНТЫ =======================
 extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
     return 0;
 }
@@ -35,13 +55,15 @@ uint8_t currentBrightness = BRIGHT_DEFAULT;
 
 enum Screen {
     MAIN_MENU, POWER_MENU, IR_MENU, WIFI_MENU, BLE_MENU, SETTINGS_MENU,
-    WIFI_SCAN, BLE_RUN, IR_JAM_CONFIG, IR_JAM_RUN, DEAUTH_RUN, BEACON_RUN
+    WIFI_SCAN, BLE_RUN, IR_JAM_CONFIG, IR_JAM_RUN, DEAUTH_RUN, BEACON_RUN,
+    TVBG_REGION, TVBG_RUN
 };
 Screen currentScreen = MAIN_MENU;
 int menuIndex = 0;
 int scanIndex = 0;
 bool needsRedraw = true;
 
+// ======================= WI-FI SCAN & DEAUTH =======================
 struct WiFiNetwork {
     String ssid;
     uint8_t bssid[6];
@@ -60,6 +82,7 @@ unsigned long deauthLastDisplay = 0;
 uint32_t deauthFrameCount = 0;
 bool deauthApStarted = false;
 
+// ======================= WI-FI BEACON SPAM =======================
 bool beaconSpamRunning = false;
 unsigned long beaconLastSend = 0;
 unsigned long beaconLastDisplay = 0;
@@ -74,6 +97,7 @@ const char* funnySSIDs[] = {
 };
 const int NUM_FUNNY_SSIDS = sizeof(funnySSIDs) / sizeof(funnySSIDs[0]);
 
+// ======================= BLE SPAM =======================
 bool bleSpamRunning = false;
 bool bleAppleJuice = true;
 unsigned long lastBlePacket = 0;
@@ -81,6 +105,7 @@ NimBLEAdvertising *pAdvertising = nullptr;
 uint32_t blePacketCount = 0;
 unsigned long bleLastDisplay = 0;
 
+// ======================= IR JAMMER =======================
 enum JamMode { JAM_BASIC, JAM_ENHANCED, JAM_SWEEP, JAM_RANDOM, JAM_EMPTY };
 const char* JAM_MODE_NAMES[] = {"BASIC", "ENHANCED", "SWEEP", "RANDOM", "EMPTY"};
 
@@ -101,6 +126,19 @@ struct IRJammerState {
 const uint16_t IR_FREQS[] = {30000, 33000, 36000, 38000, 40000, 42000, 56000};
 const int NUM_IR_FREQS = 7;
 
+// ======================= TV-B-GONE =======================
+bool tvbgRunning = false;
+int  tvbgRegion = 1; // 0 = NA, 1 = EU
+uint8_t tvbgCodeIdx = 0;
+uint8_t tvbgTotalCodes = 0;
+unsigned long tvbgLastCode = 0;
+uint8_t tvbgBitsLeft = 0;
+uint8_t tvbgBits = 0;
+uint8_t tvbgCodePtr = 0;
+const IrCode *volatile tvbgPowerCode = nullptr;
+const RawIrCode *volatile tvbgRawPowerCode = nullptr;
+
+// ======================= ПРОТОТИПЫ =======================
 void drawBatteryStatus();
 void drawCurrentScreen();
 void drawMenu(const char *title, const char *items[], int itemCount);
@@ -112,7 +150,8 @@ void handlePowerMenu();
 void handleIRMenu();
 void handleWiFiMenu();
 void handleBLEMenu();
-void startTVBGone();
+void startTVBGone(int region);
+void runTVBGone();
 void startIRJammer(JamMode mode);
 void runIRJammer();
 void startWiFiScan();
@@ -128,6 +167,7 @@ void runBLESpam();
 void stopBLESpam();
 void goToDeepSleep();
 
+// ======================= SETUP =======================
 void setup() {
     Serial.begin(115200);
     auto cfg = M5.config();
@@ -149,6 +189,7 @@ void setup() {
     needsRedraw = true;
 }
 
+// ======================= LOOP =======================
 void loop() {
     M5Cardputer.update();
     bool changed = false;
@@ -195,6 +236,12 @@ void loop() {
             if (currentScreen == SETTINGS_MENU) {
                 prefs.putUChar("brightness", currentBrightness);
                 currentScreen = MAIN_MENU; menuIndex = 0; changed = true;
+            } else if (currentScreen == TVBG_RUN) {
+                tvbgRunning = false;
+                digitalWrite(IR_TX_PIN, LOW);
+                currentScreen = IR_MENU; menuIndex = 0; changed = true;
+            } else if (currentScreen == TVBG_REGION) {
+                currentScreen = IR_MENU; menuIndex = 0; changed = true;
             } else if (currentScreen == IR_JAM_RUN) {
                 digitalWrite(IR_TX_PIN, LOW);
                 currentScreen = IR_JAM_CONFIG; menuIndex = (int)irJam.jamMode; changed = true;
@@ -227,6 +274,10 @@ void loop() {
             else if (currentScreen == IR_JAM_CONFIG) {
                 startIRJammer((JamMode)menuIndex);
                 currentScreen = IR_JAM_RUN;
+            } else if (currentScreen == TVBG_REGION) {
+                tvbgRegion = menuIndex;
+                startTVBGone(tvbgRegion);
+                currentScreen = TVBG_RUN;
             }
             changed = true;
         }
@@ -246,10 +297,12 @@ void loop() {
     if (currentScreen == DEAUTH_RUN && deauthRunning)        runDeauth();
     if (currentScreen == WIFI_SCAN && wifiScanInProgress)    checkWifiScan();
     if (currentScreen == BEACON_RUN && beaconSpamRunning)    runBeaconSpam();
+    if (currentScreen == TVBG_RUN && tvbgRunning)            runTVBGone();
 
     delay(5);
 }
 
+// ======================= ОТРИСОВКА =======================
 void drawBatteryStatus() {
     M5Cardputer.Display.fillRect(0, 0, SCREEN_W, 16, PANEL_COLOR);
     M5Cardputer.Display.setTextColor(TEXT_COLOR, PANEL_COLOR);
@@ -337,6 +390,27 @@ void drawCurrentScreen() {
         case IR_MENU: {
             const char* items[] = {"TV-B-Gone", "IR Jammer"};
             drawMenu("IR", items, 2); break;
+        }
+        case TVBG_REGION: {
+            const char* items[] = {"NA (America/Asia)", "EU (Europe/Africa)"};
+            drawMenu("TV-B-Gone Region", items, 2);
+            M5Cardputer.Display.setTextColor(DIM_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, SCREEN_H - 12);
+            M5Cardputer.Display.print("Enter=start  `=back");
+            break;
+        }
+        case TVBG_RUN: {
+            M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, 22);
+            M5Cardputer.Display.print(tvbgRegion == 0 ? "TV-B-Gone NA" : "TV-B-Gone EU");
+            M5Cardputer.Display.drawFastHLine(10, 32, SCREEN_W - 20, ACCENT_COLOR);
+            M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, 40);
+            M5Cardputer.Display.print("Sending codes...");
+            M5Cardputer.Display.setTextColor(DIM_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, SCREEN_H - 12);
+            M5Cardputer.Display.print("` to stop");
+            break;
         }
         case IR_JAM_CONFIG: {
             const char* items[] = {"BASIC", "ENHANCED", "SWEEP", "RANDOM", "EMPTY"};
@@ -442,7 +516,8 @@ void drawCurrentScreen() {
 bool isMenuScreen() {
     return currentScreen == MAIN_MENU   || currentScreen == POWER_MENU ||
            currentScreen == IR_MENU     || currentScreen == WIFI_MENU  ||
-           currentScreen == BLE_MENU    || currentScreen == IR_JAM_CONFIG;
+           currentScreen == BLE_MENU    || currentScreen == IR_JAM_CONFIG ||
+           currentScreen == TVBG_REGION;
 }
 
 int getItemCount() {
@@ -450,6 +525,7 @@ int getItemCount() {
         case MAIN_MENU:      return 5;
         case POWER_MENU:     return 3;
         case IR_MENU:        return 2;
+        case TVBG_REGION:    return 2;
         case WIFI_MENU:      return 2;
         case BLE_MENU:       return 2;
         case IR_JAM_CONFIG:  return 5;
@@ -457,6 +533,7 @@ int getItemCount() {
     }
 }
 
+// ======================= ОБРАБОТЧИКИ МЕНЮ =======================
 void handleMainMenu() {
     if (menuIndex == 0)      currentScreen = POWER_MENU;
     else if (menuIndex == 1) currentScreen = IR_MENU;
@@ -472,7 +549,7 @@ void handlePowerMenu() {
     menuIndex = 0;
 }
 void handleIRMenu() {
-    if (menuIndex == 0)      startTVBGone();
+    if (menuIndex == 0)      { currentScreen = TVBG_REGION; menuIndex = 0; }
     else if (menuIndex == 1) { currentScreen = IR_JAM_CONFIG; menuIndex = (int)irJam.jamMode; }
 }
 void handleWiFiMenu() {
@@ -490,6 +567,7 @@ void handleBLEMenu() {
     currentScreen = BLE_RUN;
 }
 
+// ======================= POWER =======================
 void goToDeepSleep() {
     M5Cardputer.Display.fillScreen(BG_COLOR);
     M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
@@ -499,21 +577,103 @@ void goToDeepSleep() {
     M5.Power.deepSleep();
 }
 
-void startTVBGone() {
-    M5Cardputer.Display.fillScreen(BG_COLOR);
-    M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
-    M5Cardputer.Display.setCursor(10, 40);
-    M5Cardputer.Display.print("TV-B-Gone...");
-    uint32_t powerCodes[] = {0x20DF10EF, 0xE0E040BF, 0x10EF, 0x48B7, 0x00FF};
-    for (int i = 0; i < 5; i++) {
-        irsend.sendNEC(powerCodes[i], 32);
-        delay(20);
+// ======================= TV-B-GONE ЛОГИКА =======================
+uint8_t read_bits(uint8_t count) {
+    uint8_t tmp = 0;
+    while (count--) {
+        if (tvbgBitsLeft == 0) {
+            tvbgBits = tvbgPowerCode->codes[tvbgCodePtr++];
+            tvbgBitsLeft = 8;
+        }
+        tmp = (tmp << 1) | ((tvbgBits >> --tvbgBitsLeft) & 1);
     }
-    needsRedraw = true;
-    currentScreen = IR_MENU;
-    menuIndex = 0;
+    return tmp;
 }
 
+void sendParsedCodeBatch(const IrCode *const *codes, uint8_t count, IRsend &irsend) {
+    uint16_t rawData[300];
+    for (uint8_t i = 0; i < count; i++) {
+        if (!tvbgRunning) return;
+        tvbgPowerCode = codes[i];
+        const uint8_t freq = tvbgPowerCode->timer_val;
+        const uint8_t numpairs = tvbgPowerCode->numpairs;
+        const uint8_t bitcompression = tvbgPowerCode->bitcompression;
+        tvbgCodePtr = 0;
+        for (uint8_t k = 0; k < numpairs; k++) {
+            uint16_t ti = (read_bits(bitcompression)) * 2;
+            rawData[k * 2] = tvbgPowerCode->times[ti] * 10;
+            rawData[(k * 2) + 1] = tvbgPowerCode->times[ti + 1] * 10;
+        }
+        irsend.sendRaw(rawData, (numpairs * 2), freq);
+        tvbgBitsLeft = 0;
+        delay(20);
+    }
+}
+
+void sendRawCodeBatch(const RawIrCode *const *codes, uint8_t count, IRsend &irsend) {
+    uint16_t rawData[300];
+    for (uint8_t i = 0; i < count; i++) {
+        if (!tvbgRunning) return;
+        tvbgRawPowerCode = codes[i];
+        const uint8_t freq = tvbgRawPowerCode->timer_val;
+        const uint8_t numpairs = tvbgRawPowerCode->numpairs;
+        for (uint8_t k = 0; k < numpairs; k++) {
+            rawData[k * 2] = (uint16_t)tvbgRawPowerCode->times[k * 2];
+            rawData[(k * 2) + 1] = (uint16_t)tvbgRawPowerCode->times[k * 2 + 1];
+        }
+        irsend.sendRaw(rawData, (numpairs * 2), freq);
+        delay(20);
+    }
+}
+
+void startTVBGone(int region) {
+    tvbgRunning = true;
+    tvbgRegion = region;
+    tvbgCodeIdx = 0;
+    tvbgTotalCodes = (region == 0) ? num_NAcodes : num_EUcodes;
+    tvbgLastCode = millis();
+    needsRedraw = true;
+}
+
+void runTVBGone() {
+    if (!tvbgRunning) return;
+
+    if (millis() - tvbgLastCode < 50) return;
+    tvbgLastCode = millis();
+
+    if (tvbgRegion == 0) {
+        sendParsedCodeBatch(&NApowerCodes[tvbgCodeIdx], 1, irsend);
+    } else {
+        sendParsedCodeBatch(&EUpowerCodes[tvbgCodeIdx], 1, irsend);
+    }
+
+    tvbgCodeIdx++;
+
+    if (millis() % 500 < 50) {
+        M5Cardputer.Display.fillRect(10, 55, 220, 55, BG_COLOR);
+        M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
+        M5Cardputer.Display.setCursor(10, 55);
+        M5Cardputer.Display.print("Code: " + String(tvbgCodeIdx) + "/" + String(tvbgTotalCodes));
+        M5Cardputer.Display.setCursor(10, 70);
+        M5Cardputer.Display.print(tvbgRegion == 0 ? "Region: NA" : "Region: EU");
+    }
+
+    if (tvbgCodeIdx >= tvbgTotalCodes) {
+        sendParsedCodeBatch(UniversalParsedCodes, num_UniversalParsedCodes, irsend);
+        sendRawCodeBatch(UniversalRawCodes, num_UniversalRawCodes, irsend);
+        tvbgRunning = false;
+        M5Cardputer.Display.fillRect(10, 55, 220, 55, BG_COLOR);
+        M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
+        M5Cardputer.Display.setCursor(10, 55);
+        M5Cardputer.Display.print("All codes sent!");
+        delay(1000);
+        currentScreen = IR_MENU;
+        menuIndex = 0;
+        needsRedraw = true;
+    }
+}
+
+// ======================= IR JAMMER =======================
 void startIRJammer(JamMode mode) {
     irJam.jamMode     = mode;
     irJam.markTiming  = 12;
@@ -610,6 +770,7 @@ void runIRJammer() {
     }
 }
 
+// ======================= WI-FI =======================
 void startWiFiScan() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -785,6 +946,7 @@ void stopBeaconSpam() {
     delay(50);
 }
 
+// ======================= BLE =======================
 void startBLESpam(bool apple) {
     NimBLEDevice::init(apple ? "AppleJuice" : "SwiftPair");
     pAdvertising = NimBLEDevice::getAdvertising();
