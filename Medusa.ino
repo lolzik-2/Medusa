@@ -9,23 +9,9 @@
 #include <algorithm>
 #include <vector>
 
-// ======================= ИСПРАВЛЕННЫЕ СТРУКТУРЫ ДЛЯ TV-B-GONE =======================
-struct IrCode {
-    uint8_t timer_val;
-    uint8_t numpairs;
-    uint8_t bitcompression;
-    const uint32_t *times;
-    const uint8_t  *codes;
-};
-
-struct RawIrCode {
-    uint8_t timer_val;
-    uint8_t numpairs;
-    const uint32_t *times;
-};
-
 // ======================= ПОДКЛЮЧЕНИЕ БАЗЫ IR-КОДОВ =======================
-// Файл WORLD_IR_CODES.h должен лежать в той же папке, что и Medusa.ino
+// ВАЖНО: Структуры IrCode и RawIrCode уже определены внутри WORLD_IR_CODES.h.
+// Убедитесь, что файл WORLD_IR_CODES.h лежит в той же папке, что и Medusa.ino.
 #include "WORLD_IR_CODES.h"
 
 // ======================= СИСТЕМНЫЕ КОНСТАНТЫ =======================
