@@ -35,7 +35,8 @@ uint8_t currentBrightness = BRIGHT_DEFAULT;
 
 enum Screen {
     MAIN_MENU, POWER_MENU, IR_MENU, WIFI_MENU, BLE_MENU, SETTINGS_MENU,
-    WIFI_SCAN, BLE_RUN, IR_JAM_CONFIG, IR_JAM_RUN, DEAUTH_RUN
+    WIFI_SCAN, BLE_RUN, IR_JAM_CONFIG, IR_JAM_RUN, DEAUTH_RUN, PROJECTOR_MENU,
+    BEACON_SPAM_RUN
 };
 Screen currentScreen = MAIN_MENU;
 int menuIndex = 0;
@@ -59,6 +60,19 @@ unsigned long deauthLastSend = 0;
 unsigned long deauthLastDisplay = 0;
 uint32_t deauthFrameCount = 0;
 bool deauthApStarted = false;
+
+bool beaconSpamRunning = false;
+unsigned long lastBeaconTime = 0;
+unsigned long beaconLastDisplay = 0;
+uint32_t beaconPacketCount = 0;
+int currentSSIDIdx = 0;
+
+const char* fakeSSIDs[] = {
+    "lol", "ez", "lmao", "Free WiFi", "Get Rekt", 
+    "404 Network", "FBI Van", "Virus.exe", "Medusa", 
+    "Drop it like it's hot", "Tell my WiFi love her"
+};
+const int numFakeSSIDs = sizeof(fakeSSIDs) / sizeof(fakeSSIDs[0]);
 
 bool bleSpamRunning = false;
 bool bleAppleJuice = true;
@@ -106,10 +120,14 @@ void checkWifiScan();
 void startTargetDeauth(int index);
 void runDeauth();
 void stopDeauth();
+void startBeaconSpam();
+void runBeaconSpam();
+void stopBeaconSpam();
 void startBLESpam(bool apple);
 void runBLESpam();
 void stopBLESpam();
 void goToDeepSleep();
+void sendProjectorCode(int action);
 
 void setup() {
     Serial.begin(115200);
@@ -186,6 +204,9 @@ void loop() {
             } else if (currentScreen == DEAUTH_RUN) {
                 stopDeauth();
                 currentScreen = WIFI_MENU; menuIndex = 0; changed = true;
+            } else if (currentScreen == BEACON_SPAM_RUN) {
+                stopBeaconSpam();
+                currentScreen = WIFI_MENU; menuIndex = 0; changed = true;
             } else if (currentScreen == BLE_RUN) {
                 stopBLESpam();
                 currentScreen = BLE_MENU; menuIndex = 0; changed = true;
@@ -194,6 +215,8 @@ void loop() {
                 wifiScanInProgress = false;
                 WiFi.mode(WIFI_OFF);
                 currentScreen = WIFI_MENU; menuIndex = 0; changed = true;
+            } else if (currentScreen == PROJECTOR_MENU) {
+                currentScreen = IR_MENU; menuIndex = 0; changed = true;
             } else if (currentScreen != MAIN_MENU) {
                 currentScreen = MAIN_MENU; menuIndex = 0; changed = true;
             }
@@ -207,6 +230,13 @@ void loop() {
             else if (currentScreen == IR_JAM_CONFIG) {
                 startIRJammer((JamMode)menuIndex);
                 currentScreen = IR_JAM_RUN;
+            } else if (currentScreen == PROJECTOR_MENU) {
+                if (menuIndex == 4) {
+                    currentScreen = IR_MENU;
+                    menuIndex = 0;
+                } else {
+                    sendProjectorCode(menuIndex);
+                }
             }
             changed = true;
         }
@@ -224,6 +254,7 @@ void loop() {
     if (currentScreen == BLE_RUN && bleSpamRunning)         runBLESpam();
     if (currentScreen == IR_JAM_RUN)                        runIRJammer();
     if (currentScreen == DEAUTH_RUN && deauthRunning)       runDeauth();
+    if (currentScreen == BEACON_SPAM_RUN && beaconSpamRunning) runBeaconSpam();
     if (currentScreen == WIFI_SCAN && wifiScanInProgress)   checkWifiScan();
 
     delay(5);
@@ -314,8 +345,8 @@ void drawCurrentScreen() {
             drawMenu("Power", items, 3); break;
         }
         case IR_MENU: {
-            const char* items[] = {"TV-B-Gone", "IR Jammer"};
-            drawMenu("IR", items, 2); break;
+            const char* items[] = {"TV-B-Gone", "IR Jammer", "Projector"};
+            drawMenu("IR", items, 3); break;
         }
         case IR_JAM_CONFIG: {
             const char* items[] = {"BASIC", "ENHANCED", "SWEEP", "RANDOM", "EMPTY"};
@@ -325,9 +356,17 @@ void drawCurrentScreen() {
             M5Cardputer.Display.print("Enter=start  `=back");
             break;
         }
+        case PROJECTOR_MENU: {
+            const char* items[] = {"Power", "Vol+", "Vol-", "Mute", "Back"};
+            drawMenu("Projector", items, 5);
+            M5Cardputer.Display.setTextColor(DIM_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, SCREEN_H - 12);
+            M5Cardputer.Display.print("Enter=send  `=back");
+            break;
+        }
         case WIFI_MENU: {
-            const char* items[] = {"Scan & Target Deauth"};
-            drawMenu("Wi-Fi", items, 1); break;
+            const char* items[] = {"Scan & Target Deauth", "Beacon Spam"};
+            drawMenu("Wi-Fi", items, 2); break;
         }
         case BLE_MENU: {
             const char* items[] = {"AppleJuice (iOS)", "SwiftPair (Windows)"};
@@ -389,6 +428,19 @@ void drawCurrentScreen() {
             M5Cardputer.Display.print("` to stop");
             break;
         }
+        case BEACON_SPAM_RUN: {
+            M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, 22);
+            M5Cardputer.Display.print("Beacon Spam");
+            M5Cardputer.Display.drawFastHLine(10, 32, SCREEN_W - 20, ACCENT_COLOR);
+            M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, 42);
+            M5Cardputer.Display.print("Spamming...");
+            M5Cardputer.Display.setTextColor(DIM_COLOR, BG_COLOR);
+            M5Cardputer.Display.setCursor(10, SCREEN_H - 12);
+            M5Cardputer.Display.print("` to stop");
+            break;
+        }
         case BLE_RUN: {
             M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
             M5Cardputer.Display.setCursor(10, 22);
@@ -408,17 +460,19 @@ void drawCurrentScreen() {
 bool isMenuScreen() {
     return currentScreen == MAIN_MENU   || currentScreen == POWER_MENU ||
            currentScreen == IR_MENU     || currentScreen == WIFI_MENU  ||
-           currentScreen == BLE_MENU    || currentScreen == IR_JAM_CONFIG;
+           currentScreen == BLE_MENU    || currentScreen == IR_JAM_CONFIG ||
+           currentScreen == PROJECTOR_MENU;
 }
 
 int getItemCount() {
     switch (currentScreen) {
         case MAIN_MENU:      return 5;
         case POWER_MENU:     return 3;
-        case IR_MENU:        return 2;
-        case WIFI_MENU:      return 1;
+        case IR_MENU:        return 3;
+        case WIFI_MENU:      return 2;
         case BLE_MENU:       return 2;
         case IR_JAM_CONFIG:  return 5;
+        case PROJECTOR_MENU: return 5;
         default:             return 1;
     }
 }
@@ -440,10 +494,15 @@ void handlePowerMenu() {
 void handleIRMenu() {
     if (menuIndex == 0)      startTVBGone();
     else if (menuIndex == 1) { currentScreen = IR_JAM_CONFIG; menuIndex = (int)irJam.jamMode; }
+    else if (menuIndex == 2) { currentScreen = PROJECTOR_MENU; menuIndex = 0; }
 }
 void handleWiFiMenu() {
-    currentScreen = WIFI_SCAN;
-    startWiFiScan();
+    if (menuIndex == 0) {
+        currentScreen = WIFI_SCAN;
+        startWiFiScan();
+    } else if (menuIndex == 1) {
+        startBeaconSpam();
+    }
 }
 void handleBLEMenu() {
     bleAppleJuice = (menuIndex == 0);
@@ -668,6 +727,83 @@ void stopDeauth() {
     delay(50);
 }
 
+void startBeaconSpam() {
+    WiFi.disconnect();
+    delay(50);
+    WiFi.mode(WIFI_AP);
+    delay(100);
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    
+    beaconSpamRunning = true;
+    beaconPacketCount = 0;
+    lastBeaconTime = 0;
+    beaconLastDisplay = 0;
+    currentSSIDIdx = 0;
+    
+    currentScreen = BEACON_SPAM_RUN;
+    needsRedraw = true;
+}
+
+void runBeaconSpam() {
+    if (!beaconSpamRunning) return;
+    if (millis() - lastBeaconTime < 20) return;
+    lastBeaconTime = millis();
+
+    uint8_t frame[128] = {
+        0x80, 0x00, 0x00, 0x00,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x64, 0x00,
+        0x31, 0x04,
+        0x00,
+        0x00
+    };
+
+    for (int i = 10; i <= 15; i++) frame[i] = random(256);
+    frame[10] &= 0xFE;
+    frame[10] |= 0x02;
+    for (int i = 16; i <= 21; i++) frame[i] = frame[10 + (i - 16)];
+
+    const char* ssid = fakeSSIDs[currentSSIDIdx];
+    int len = strlen(ssid);
+    if (len > 32) len = 32;
+    frame[37] = len;
+    memcpy(&frame[38], ssid, len);
+
+    int offset = 38 + len;
+    frame[offset++] = 0x01;
+    frame[offset++] = 0x08;
+    frame[offset++] = 0x82; frame[offset++] = 0x84; frame[offset++] = 0x8b; frame[offset++] = 0x96;
+    frame[offset++] = 0x0c; frame[offset++] = 0x12; frame[offset++] = 0x18; frame[offset++] = 0x24;
+    frame[offset++] = 0x03;
+    frame[offset++] = 0x01;
+    frame[offset++] = 0x01;
+
+    esp_wifi_80211_tx(WIFI_IF_AP, frame, offset, false);
+
+    currentSSIDIdx = (currentSSIDIdx + 1) % numFakeSSIDs;
+    beaconPacketCount++;
+
+    if (millis() - beaconLastDisplay > 500) {
+        beaconLastDisplay = millis();
+        M5Cardputer.Display.fillRect(10, 55, 220, 35, BG_COLOR);
+        M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
+        M5Cardputer.Display.setCursor(10, 55);
+        M5Cardputer.Display.print("Packets: " + String(beaconPacketCount));
+        M5Cardputer.Display.setCursor(10, 70);
+        M5Cardputer.Display.print("SSID: " + String(fakeSSIDs[currentSSIDIdx]));
+    }
+}
+
+void stopBeaconSpam() {
+    beaconSpamRunning = false;
+    WiFi.mode(WIFI_OFF);
+    delay(50);
+}
+
 void startBLESpam(bool apple) {
     NimBLEDevice::init(apple ? "AppleJuice" : "SwiftPair");
     pAdvertising = NimBLEDevice::getAdvertising();
@@ -714,4 +850,66 @@ void stopBLESpam() {
         pAdvertising = nullptr;
     }
     NimBLEDevice::deinit(true);
+}
+
+void sendProjectorCode(int action) {
+    uint32_t nec_codes[15];
+    int nec_count = 0;
+    uint32_t samsung_codes[3];
+    int samsung_count = 0;
+
+    if (action == 0) {
+        uint32_t codes[] = {
+            0x080BF4, 0x0101FE, 0x021DE2, 0x031DE2, 0x2041BE,
+            0x31916E, 0x3202FD, 0x322ED1, 0x8600FF, 0xB80CF3, 0xFFE817
+        };
+        memcpy(nec_codes, codes, sizeof(codes));
+        nec_count = sizeof(codes) / sizeof(codes[0]);
+        samsung_codes[0] = 0x07E6;
+        samsung_count = 1;
+    } else if (action == 1) {
+        uint32_t codes[] = {
+            0x0848B7, 0x0128D7, 0x0248B7, 0x2051AE, 0x31D02F,
+            0x328C73, 0x8630CF, 0xB81FE0, 0xFFBD42
+        };
+        memcpy(nec_codes, codes, sizeof(codes));
+        nec_count = sizeof(codes) / sizeof(codes[0]);
+        samsung_codes[0] = 0x0707;
+        samsung_count = 1;
+    } else if (action == 2) {
+        uint32_t codes[] = {
+            0x0849B6, 0x0129D6, 0x0240BF, 0x2056A9,
+            0x328F70, 0x8631CE, 0xB81EE1, 0xFFF20D
+        };
+        memcpy(nec_codes, codes, sizeof(codes));
+        nec_count = sizeof(codes) / sizeof(codes[0]);
+        samsung_codes[0] = 0x070B;
+        samsung_count = 1;
+    } else if (action == 3) {
+        uint32_t codes[] = {
+            0x0814EB, 0x0102FD, 0x0218E7, 0x205AA5, 0x318976,
+            0x3252AD, 0x8632CD, 0xB80DF2
+        };
+        memcpy(nec_codes, codes, sizeof(codes));
+        nec_count = sizeof(codes) / sizeof(codes[0]);
+        samsung_codes[0] = 0x070F;
+        samsung_count = 1;
+    } else {
+        return;
+    }
+
+    for (int i = 0; i < nec_count; i++) {
+        irsend.sendNEC(nec_codes[i], 32);
+        delay(30);
+    }
+    for (int i = 0; i < samsung_count; i++) {
+        irsend.sendSAMSUNG(samsung_codes[i], 32);
+        delay(30);
+    }
+
+    M5Cardputer.Display.setTextColor(ACCENT_COLOR, BG_COLOR);
+    M5Cardputer.Display.setCursor(10, SCREEN_H - 12);
+    M5Cardputer.Display.print("Sent!");
+    delay(300);
+    needsRedraw = true;
 }
