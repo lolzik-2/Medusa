@@ -22,16 +22,21 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install m5stack:esp32
 
-      - name: Install libraries
+      - name: Install libraries (excluding IRremoteESP8266)
         run: |
           arduino-cli lib install "M5Cardputer"
-          arduino-cli lib install "IRremoteESP8266"
           arduino-cli lib install "NimBLE-Arduino"
+
+      - name: Clone compatible IRremoteESP8266 fork
+        run: |
+          mkdir -p ./libraries
+          git clone -b feature/C++20-compatibility https://github.com/tonhuisman/IRremoteESP8266.git ./libraries/IRremoteESP8266
 
       - name: Compile sketch
         run: |
           arduino-cli compile \
             --fqbn "m5stack:esp32:m5stack_cardputer:FlashSize=8M,PartitionScheme=huge_app,CDCOnBoot=cdc,USBMode=hwcdc" \
+            --libraries ./libraries \
             --build-property compiler.c.elf.extra_flags="-Wl,--allow-multiple-definition" \
             --build-property build.extra_flags="-DM5GFX_BOARD=24" \
             --output-dir ./build \
