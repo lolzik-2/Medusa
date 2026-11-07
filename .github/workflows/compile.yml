@@ -33,17 +33,17 @@ jobs:
           arduino-cli compile \
             --fqbn "m5stack:esp32:m5stack_cardputer:FlashSize=8M,PartitionScheme=huge_app,CDCOnBoot=cdc,USBMode=hwcdc" \
             --build-property compiler.c.elf.extra_flags="-Wl,--allow-multiple-definition" \
+            --build-property build.extra_flags="-DM5GFX_BOARD=24" \
             --output-dir ./build \
             Medusa.ino
 
       - name: Install esptool
         run: pip install --upgrade esptool
 
-      - name: Merge binaries into single flashable image
+      - name: Merge binaries
         run: |
           BOOT_APP0=$(find ~/.arduino15/packages/m5stack/hardware/esp32 -name "boot_app0.bin" | head -n 1)
           cp "$BOOT_APP0" ./build/boot_app0.bin
-
           esptool.py --chip esp32s3 merge_bin \
             -o ./build/Medusa-merged.bin \
             --flash_mode dio \
@@ -54,7 +54,7 @@ jobs:
             0xe000  ./build/boot_app0.bin \
             0x10000 ./build/Medusa.ino.bin
 
-      - name: Upload merged firmware artifact
+      - name: Upload merged firmware
         uses: actions/upload-artifact@v4
         with:
           name: Medusa-merged-firmware
