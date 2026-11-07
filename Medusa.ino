@@ -132,7 +132,10 @@ void setup() {
     Serial.begin(115200);
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
-    M5Cardputer.Display.setRotation(1);
+    
+    // Если экран боком — поменяй 1 на 3, 0 или 2
+    M5Cardputer.Display.setRotation(1); 
+    
     M5Cardputer.Display.fillScreen(BG_COLOR);
     M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
     M5Cardputer.Display.setTextSize(1);
