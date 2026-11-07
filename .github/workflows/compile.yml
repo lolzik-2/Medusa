@@ -15,17 +15,17 @@ jobs:
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v1
 
-      - name: Install ESP32 Core 2.0.17
+      - name: Install ESP32 Core
         run: |
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32@2.0.17
+          arduino-cli core install esp32:esp32
 
-      - name: Install libraries (fixed versions)
+      - name: Install libraries
         run: |
           arduino-cli lib install "M5Cardputer"
-          arduino-cli lib install "IRremoteESP8266@2.8.6"
+          arduino-cli lib install "IRremote"
           arduino-cli lib install "NimBLE-Arduino"
 
       - name: Compile sketch
@@ -42,7 +42,7 @@ jobs:
 
       - name: Merge binaries
         run: |
-          BOOT_APP0=$(find ~/.arduino15/packages/esp32/hardware/esp32/2.0.17 -name "boot_app0.bin" | head -n 1)
+          BOOT_APP0=$(find ~/.arduino15/packages/esp32/hardware/esp32 -name "boot_app0.bin" | head -n 1)
           cp "$BOOT_APP0" ./build/boot_app0.bin
           esptool.py --chip esp32s3 merge_bin \
             -o ./build/Medusa-merged.bin \
