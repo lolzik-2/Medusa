@@ -15,23 +15,29 @@ jobs:
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v1
 
-      - name: Install M5Stack ESP32 core (v2.1.4)
+      - name: Install M5Stack ESP32 core
         run: |
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/arduino/package_m5stack_index.json
           arduino-cli core update-index
-          arduino-cli core install m5stack:esp32@2.1.4
+          arduino-cli core install m5stack:esp32
 
       - name: Install libraries
         run: |
           arduino-cli lib install "M5Cardputer"
-          arduino-cli lib install "IRremoteESP8266"
           arduino-cli lib install "NimBLE-Arduino"
+
+      - name: Clone patched IRremoteESP8266
+        run: |
+          mkdir -p ./libraries
+          # Клонируем форк с поддержкой нового API таймеров ESP32 Core v3.x
+          git clone https://github.com/macca448/IRremoteESP8266_patch.git ./libraries/IRremoteESP8266
 
       - name: Compile sketch
         run: |
           arduino-cli compile \
             --fqbn "m5stack:esp32:m5stack_cardputer:FlashSize=8M,PartitionScheme=huge_app,CDCOnBoot=cdc,USBMode=hwcdc" \
+            --libraries ./libraries \
             --build-property compiler.c.elf.extra_flags="-Wl,--allow-multiple-definition" \
             --build-property build.extra_flags="-DM5GFX_BOARD=24" \
             --output-dir ./build \
