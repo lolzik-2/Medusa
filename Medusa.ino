@@ -10,8 +10,8 @@
 #include <vector>
 
 // ======================= ПОДКЛЮЧЕНИЕ БАЗЫ IR-КОДОВ =======================
-// ВАЖНО: Структуры IrCode и RawIrCode уже определены внутри WORLD_IR_CODES.h.
-// Убедитесь, что файл WORLD_IR_CODES.h лежит в той же папке, что и Medusa.ino.
+// Убедитесь, что файл WORLD_IR_CODES.h лежит в той же папке.
+// Структуры IrCode и RawIrCode уже определены внутри него.
 #include "WORLD_IR_CODES.h"
 
 // ======================= СИСТЕМНЫЕ КОНСТАНТЫ =======================
@@ -114,7 +114,7 @@ const int NUM_IR_FREQS = 7;
 
 // ======================= TV-B-GONE =======================
 bool tvbgRunning = false;
-int  tvbgRegion = 1; // 0 = NA, 1 = EU
+int  tvbgRegion = 1;
 uint8_t tvbgCodeIdx = 0;
 uint8_t tvbgTotalCodes = 0;
 unsigned long tvbgLastCode = 0;
@@ -158,7 +158,10 @@ void setup() {
     Serial.begin(115200);
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
+    
+    // ВАЖНО: Для Cardputer ADV правильный поворот - 1 (ландшафт)
     M5Cardputer.Display.setRotation(1);
+    
     M5Cardputer.Display.fillScreen(BG_COLOR);
     M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
     M5Cardputer.Display.setTextSize(1);
