@@ -22,10 +22,10 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@2.0.17
 
-      - name: Install libraries
+      - name: Install libraries (fixed versions)
         run: |
           arduino-cli lib install "M5Cardputer"
-          arduino-cli lib install "IRremoteESP8266"
+          arduino-cli lib install "IRremoteESP8266@2.8.6"
           arduino-cli lib install "NimBLE-Arduino"
 
       - name: Compile sketch
