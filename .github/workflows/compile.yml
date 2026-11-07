@@ -15,25 +15,24 @@ jobs:
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v1
 
-      - name: Install ESP32 Core
+      - name: Install M5Stack ESP32 core
         run: |
           arduino-cli config init
-          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli config add board_manager.additional_urls https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/arduino/package_m5stack_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+          arduino-cli core install m5stack:esp32
 
       - name: Install libraries
         run: |
           arduino-cli lib install "M5Cardputer"
-          arduino-cli lib install "IRremote"
+          arduino-cli lib install "IRremoteESP8266"
           arduino-cli lib install "NimBLE-Arduino"
 
       - name: Compile sketch
         run: |
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=huge_app,CDCOnBoot=cdc,USBMode=hwcdc" \
+            --fqbn "m5stack:esp32:m5stack_cardputer:FlashSize=8M,PartitionScheme=huge_app,CDCOnBoot=cdc,USBMode=hwcdc" \
             --build-property compiler.c.elf.extra_flags="-Wl,--allow-multiple-definition" \
-            --build-property build.extra_flags="-DM5GFX_BOARD=24" \
             --output-dir ./build \
             Medusa.ino
 
@@ -42,7 +41,7 @@ jobs:
 
       - name: Merge binaries
         run: |
-          BOOT_APP0=$(find ~/.arduino15/packages/esp32/hardware/esp32 -name "boot_app0.bin" | head -n 1)
+          BOOT_APP0=$(find ~/.arduino15/packages/m5stack/hardware/esp32 -name "boot_app0.bin" | head -n 1)
           cp "$BOOT_APP0" ./build/boot_app0.bin
           esptool.py --chip esp32s3 merge_bin \
             -o ./build/Medusa-merged.bin \
