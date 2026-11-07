@@ -134,7 +134,7 @@ void setup() {
     M5Cardputer.begin(cfg, true);
     
     // Если экран боком — поменяй 1 на 3, 0 или 2
-    M5Cardputer.Display.setRotation(3); 
+    M5Cardputer.Display.setRotation(2); 
     
     M5Cardputer.Display.fillScreen(BG_COLOR);
     M5Cardputer.Display.setTextColor(TEXT_COLOR, BG_COLOR);
